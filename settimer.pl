@@ -30,7 +30,8 @@ if ($ACTIVE == 1)
 	{
 		my $szEventName = $paszEvent->[0];
 		
-		if ($szEventName eq "VEVENT")
+		# only use time if it is an event and not a birthday
+		if ( ($szEventName eq "VEVENT") and ($paszEvent->[1]->{"SUMMARY"} !~ m/BirthdayRemind/ ) )
 		{
 			my $szTime = $paszEvent->[1]->{"DTSTART"};
 			if (ref($szTime) eq "ARRAY")
@@ -60,7 +61,7 @@ if ($ACTIVE == 1)
 	{
 		warn "Time: $szTime\n" if ($DEBUG == 1);
 		
-		if ($szTime =~ m/^(\d{4})(\d\d)(\d\d)T(\d\d)(\d\d)(\d\d)$/)
+		if ($szTime =~ m/^(\d{4})(\d\d)(\d\d)T(\d\d)(\d\d)(\d\d)(Z?)$/)
 		{
 			my $nYear = $1;
 			my $nMonth = $2;
@@ -68,12 +69,20 @@ if ($ACTIVE == 1)
 			my $nHour = $4;
 			my $nMinute = $5;
 			my $nSecond = $6;
+			my $fIsWorldTime = ($7 eq "Z");
 			
 			
 			# nur den ersten Termin des Tages nehmen
 			my $szDay = $nYear.$nMonth.$nDay;
 			next if ($szDay eq $szLastDay);
 			$szLastDay = $szDay;
+			
+			# calulate berlin time from world time if needed
+			if ($fIsWorldTime)
+			{
+				# TODO passt das auch im winter oder darf es da nur 1 stunde sein
+				$nHour += 2;
+			}
 			
 			
 			my $nNewTimeInSec = timelocal( $nSecond, $nMinute, $nHour, $nDay, $nMonth-1, $nYear );
