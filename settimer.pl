@@ -8,17 +8,17 @@ use Tie::iCal();
 use Data::Dumper();
 
 my $DEBUG					= 1;
-my $ACTIVE					= 1;
 my $LAST_WAKE_EVENT_HOUR	= 14;
 my $WAKE_TIME_MIN_DIFF		= 1*60 + 15;
+# the time which will be waited until reloading the ical file (sec)
+my $ICAL_RELOAD_PERIODE		= 2 * 60 * 60;
 
 
 my $ICAL_FILE= "/media/server/private/wischer/Backup/.kde/share/apps/korganizer/std.ics";
 $ICAL_FILE= "/home/timo/.kde/share/apps/korganizer/std.ics" if ($DEBUG == 1);
 
 
-my $nTimerSec = 0;
-if ($ACTIVE == 1)
+while (1)
 {
 	my %mpszEvents = ();
 	tie %mpszEvents, 'Tie::iCal', $ICAL_FILE or die "Failed to tie file!\n";
@@ -56,11 +56,12 @@ if ($ACTIVE == 1)
 	
 	
 	my $szLastDay = "";
+	my $nTimerSec = 0;
 	foreach my $szTime (sort @aszWakeTimes)
 	{
 		warn "Time: $szTime\n" if ($DEBUG == 1);
 		
-		if ($szTime =~ m/^(\d{4})(\d\d)(\d\d)T(\d\d)(\d\d)(\d\d)$/)
+		if ($szTime =~ m/(\d{4})(\d\d)(\d\d)T(\d\d)(\d\d)(\d\d)/)
 		{
 			my $nYear = $1;
 			my $nMonth = $2;
@@ -98,10 +99,17 @@ if ($ACTIVE == 1)
 	untie %mpszEvents;
 	
 	print "INFO: Next wake up time is ".localtime($nTimerSec)."\r\n";
-}
-
-print "INFO: Write new time to NVRAM.\n";
-if ($DEBUG == 0)
-{
-	print `nvram-wakeup -s $nTimerSec -A -C /etc/nvram-wakeup.conf`;
+	
+	my $nSecondsUntilWakeup = $nTimerSec - time;
+	if ( $nSecondsUntilWakeup < ($ICAL_RELOAD_PERIODE + 360) )
+	{
+	  print "Waiting last $nSecondsUntilWakeup Seconds until wake up event.\n";
+	  sleep($nSecondsUntilWakeup);
+	  print `mpdctrlclient play`;
+	}
+	else
+	{
+	  # next wake up time is later than reload priority for the ical file
+	  sleep($ICAL_RELOAD_PERIODE);
+	}
 }
