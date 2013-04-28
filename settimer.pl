@@ -1,125 +1,107 @@
 #!/usr/bin/perl -w
+#
+# sudo apt-get install libtie-ical-perl
+#
 use strict;
 use Time::Local;
-use Date::Calc();
+use Tie::iCal();
+use Data::Dumper();
 
-my $fActive = 1;
+my $DEBUG					= 1;
+my $ACTIVE					= 1;
+my $LAST_WAKE_EVENT_HOUR	= 14;
+my $WAKE_TIME_MIN_DIFF		= 1*60 + 15;
+
+
+my $ICAL_FILE= "/media/server/private/wischer/Backup/.kde/share/apps/korganizer/std.ics";
+$ICAL_FILE= "/home/timo/.kde/share/apps/korganizer/std.ics" if ($DEBUG == 1);
 
 
 my $nTimerSec = 0;
-if ($fActive == 1)
+if ($ACTIVE == 1)
 {
-	my $nTimeInSec = time;
-	# nächste mögliche Weckzeit berechnen (aktuelle Zeit + 10 min)
-	my (undef, $nNextPossibleWakeUpMinute, $nNextPossibleWakeUpHour) = localtime( time + 10 * 60 );
-	foreach (0..13)
+	my %mpszEvents = ();
+	tie %mpszEvents, 'Tie::iCal', $ICAL_FILE or die "Failed to tie file!\n";
+	
+	warn Data::Dumper::Dumper( \%mpszEvents ) if ($DEBUG == 1);
+	
+	my @aszWakeTimes = ();
+	while (  my($szEventKey,$paszEvent) = each(%mpszEvents)  )
 	{
-		my ($nWakeUpHour, $nWakeUpMinute) = GetWakeUpTimeForDay( $nTimeInSec );
+		my $szEventName = $paszEvent->[0];
 		
-		if ( (defined $nWakeUpHour) and (defined $nWakeUpMinute) )
+		if ($szEventName eq "VEVENT")
 		{
-			if (   ($_ > 0) or 
-				($nWakeUpHour > $nNextPossibleWakeUpHour) or 
-				( ($nWakeUpHour == $nNextPossibleWakeUpHour) and ($nWakeUpMinute > $nNextPossibleWakeUpMinute) )  )
+			my $szTime = $paszEvent->[1]->{"DTSTART"};
+			if (ref($szTime) eq "ARRAY")
 			{
-				my (undef, undef, undef, $nDay, $nMonth, $nYear) = localtime( $nTimeInSec );
-				$nTimerSec = timelocal( 0, $nWakeUpMinute, $nWakeUpHour, $nDay, $nMonth, $nYear );
-				
+				$szTime = $szTime->[1];
+			}
+			
+			if ( (defined $szTime) and ($szTime ne "") )
+			{
+				push @aszWakeTimes, $szTime;
+			}
+			else
+			{
+				warn "Could not determind date";
+				warn Data::Dumper::Dumper( $paszEvent );
+			}
+		}
+		elsif ( ($szEventName ne "VTODO") and ($szEventName ne "VJOURNAL") )
+		{
+			warn $szEventName;
+		}
+	}
+	
+	
+	my $szLastDay = "";
+	foreach my $szTime (sort @aszWakeTimes)
+	{
+		warn "Time: $szTime\n" if ($DEBUG == 1);
+		
+		if ($szTime =~ m/^(\d{4})(\d\d)(\d\d)T(\d\d)(\d\d)(\d\d)$/)
+		{
+			my $nYear = $1;
+			my $nMonth = $2;
+			my $nDay = $3;
+			my $nHour = $4;
+			my $nMinute = $5;
+			my $nSecond = $6;
+			
+			
+			# nur den ersten Termin des Tages nehmen
+			my $szDay = $nYear.$nMonth.$nDay;
+			next if ($szDay eq $szLastDay);
+			$szLastDay = $szDay;
+			
+			
+			my $nNewTimeInSec = timelocal( $nSecond, $nMinute, $nHour, $nDay, $nMonth-1, $nYear );
+#			my @anDate = localtime( $nNewTimeInSec );
+#			my $nDayOfWeek = $anDate[6];
+#			# Sonntags und Samstags nicht wecken
+#			 and ($nDayOfWeek != 0) and ($nDayOfWeek != 6)
+
+			# nächste Zeit suchen welche in der Zukunft liegt
+			if ( ($nNewTimeInSec > time) and ($nHour <= $LAST_WAKE_EVENT_HOUR) )
+			{
+				$nTimerSec = $nNewTimeInSec - $WAKE_TIME_MIN_DIFF * 60;
 				last;
 			}
 		}
-		
-		print "DEBUG: Next Day\r\n";
-		
-		# add one day
-		$nTimeInSec += 24 * 3600
+		else
+		{
+			warn "could not parse $szTime\n";
+		}
 	}
+	
+	untie %mpszEvents;
 	
 	print "INFO: Next wake up time is ".localtime($nTimerSec)."\r\n";
 }
 
 print "INFO: Write new time to NVRAM.\n";
-#print `nvram-wakeup -s $nTimerSec -A -C /etc/nvram-wakeup.conf`;
-
-exit 0;
-
-
-sub GetWakeUpTimeForDay
+if ($DEBUG == 0)
 {
-	my ($nTimeInSec) = @_;
-	
-	my (undef, undef, undef, $nDay, $nMonth, $nYear, $nWDay) = localtime( $nTimeInSec );
-	
-	my $nCW = Date::Calc::Week_Number( $nYear, $nMonth + 1, $nDay );
-	# moday is the first day of a new week and not wednesday
-	$nCW++ if ( ($nWDay == 1) or ($nWDay == 2) );
-	$nCW--;
-	
-	my @anWakeUpTimeOfDay = ();
-	
-	if ($nWDay == 1)
-	{
-		# Montag
-		if ( CheckCW($nCW, 14, 16, 18, 20, 21, 23, 24, 26) )
-		{
-			@anWakeUpTimeOfDay = ( 11, 30 );
-		}
-	}
-	elsif ($nWDay == 2)
-	{
-		# Dienstag
-		if ( CheckCW($nCW, 12..23, 25, 26) )
-		{
-			@anWakeUpTimeOfDay = ( 7, 5 );
-		}
-	}
-	elsif ($nWDay == 3)
-	{
-		# Mittwoch
-		if ( CheckCW($nCW, 12..15, 17..26) )
-		{
-			@anWakeUpTimeOfDay = ( 7, 5 );
-		}
-		elsif ( CheckCW($nCW, 12..26) )
-		{
-			@anWakeUpTimeOfDay = ( 11, 30 );
-		}
-	}
-	elsif ($nWDay == 4)
-	{
-		# Donnerstag
-		if ( CheckCW($nCW, 14..21, 23..26) )
-		{
-			@anWakeUpTimeOfDay = ( 11, 30 );
-		}
-	}
-	elsif ($nWDay == 5)
-	{
-		# Freitag
-		if ( CheckCW($nCW, 12..15, 17, 18, 20, 21, 23) )
-		{
-			@anWakeUpTimeOfDay = ( 7, 5 );
-		}
-	}
-	
-	return @anWakeUpTimeOfDay;
+	print `nvram-wakeup -s $nTimerSec -A -C /etc/nvram-wakeup.conf`;
 }
-
-sub CheckCW
-{
-	my ($nIstCW, @aszSollCW) = @_;
-	
-	my $fCWMatches = 0;
-	foreach my $szSollCW (@aszSollCW)
-	{
-		if ($szSollCW == $nIstCW)
-		{
-			$fCWMatches = 1;
-			last;
-		}
-	}
-	
-	return $fCWMatches;
-}
-
-
