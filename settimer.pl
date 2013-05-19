@@ -12,6 +12,10 @@ my $ACTIVE					= 1;
 my $LAST_WAKE_EVENT_HOUR	= 14;
 my $WAKE_TIME_MIN_DIFF		= 1*60 + 15;
 
+my $DEV                         = "/sys/class/rtc/rtc0/wakealarm";
+#my $DEV                        = "/proc/acpi/alarm";              # Fuer Kernel < 2.6.22
+
+
 
 my $ICAL_FILE= "/media/server/private/wischer/Backup/.kde/share/apps/korganizer/std.ics";
 $ICAL_FILE= "/home/timo/.kde/share/apps/korganizer/std.ics" if ($DEBUG == 1);
@@ -112,5 +116,10 @@ if ($ACTIVE == 1)
 print "INFO: Write new time to NVRAM.\n";
 if ($DEBUG == 0)
 {
-	print `nvram-wakeup -s $nTimerSec -A -C /etc/nvram-wakeup.conf`;
+	# Deactivate possibly old timer
+	print `echo 0 > $DEV`;
+	# Set new timer
+	print `echo $nTimerSec > $DEV`;
+	# print the result
+	print `cat /proc/driver/rtc`;
 }
