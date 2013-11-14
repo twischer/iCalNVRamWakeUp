@@ -3,14 +3,16 @@
 # sudo apt-get install libtie-ical-perl
 #
 use strict;
+use warnings;
 use Time::Local;
-use Tie::iCal();
+use DateTime;
+use iCal::Parser();
 use Data::Dumper();
 
 my $DEBUG					= 1;
 my $ACTIVE					= 1;
 my $LAST_WAKE_EVENT_HOUR	= 14;
-my $WAKE_TIME_MIN_DIFF		= 1*60 + 15;
+my $WAKE_TIME_MIN_DIFF		= 1*60 + 35;
 
 my $DEV                         = "/sys/class/rtc/rtc0/wakealarm";
 #my $DEV                        = "/proc/acpi/alarm";              # Fuer Kernel < 2.6.22
@@ -24,91 +26,68 @@ $ICAL_FILE= "/home/timo/.kde/share/apps/korganizer/std.ics" if ($DEBUG == 1);
 my $nTimerSec = 0;
 if ($ACTIVE == 1)
 {
-	my %mpszEvents = ();
-	tie %mpszEvents, 'Tie::iCal', $ICAL_FILE or die "Failed to tie file!\n";
-	
-	warn Data::Dumper::Dumper( \%mpszEvents ) if ($DEBUG == 1);
-	
-	my @aszWakeTimes = ();
-	while (  my($szEventKey,$paszEvent) = each(%mpszEvents)  )
+	my $pNextWakeTime = DateTime->today();
+	# caluclate the date of the next wake up day
+	if ( $pNextWakeTime->hour_1() >= $LAST_WAKE_EVENT_HOUR )
 	{
-		my $szEventName = $paszEvent->[0];
-		
-		# only use time if it is an event and not a birthday
-		if ( ($szEventName eq "VEVENT") and ($paszEvent->[1]->{"SUMMARY"} !~ m/BirthdayRemind/ ) )
-		{
-			my $szTime = $paszEvent->[1]->{"DTSTART"};
-			if (ref($szTime) eq "ARRAY")
-			{
-				$szTime = $szTime->[1];
-			}
-			
-			if ( (defined $szTime) and ($szTime ne "") )
-			{
-				push @aszWakeTimes, $szTime;
-			}
-			else
-			{
-				warn "Could not determind date";
-				warn Data::Dumper::Dumper( $paszEvent );
-			}
-		}
-		elsif ( ($szEventName ne "VTODO") and ($szEventName ne "VJOURNAL") )
-		{
-			warn $szEventName;
-		}
+		$pNextWakeTime->add( 'days' => 1 );
 	}
 	
+	my $pParser = iCal::Parser->new( 'start'=> $pNextWakeTime );
+	my $pmpEvents = $pParser->parse( $ICAL_FILE );
 	
-	my $szLastDay = "";
-	foreach my $szTime (sort @aszWakeTimes)
+	
+	# try to find the next valid appointment (exit after one week was tested)
+	for (0..6)
 	{
-		warn "Time: $szTime\n" if ($DEBUG == 1);
-		
-		if ($szTime =~ m/^(\d{4})(\d\d)(\d\d)T(\d\d)(\d\d)(\d\d)(Z?)$/)
+		# do not wake on saturday and sunday
+		while ( $pNextWakeTime->day_of_week() == 6 || $pNextWakeTime->day_of_week() == 7 )
 		{
-			my $nYear = $1;
-			my $nMonth = $2;
-			my $nDay = $3;
-			my $nHour = $4;
-			my $nMinute = $5;
-			my $nSecond = $6;
-			my $fIsWorldTime = ($7 eq "Z");
-			
-			
-			# nur den ersten Termin des Tages nehmen
-			my $szDay = $nYear.$nMonth.$nDay;
-			next if ($szDay eq $szLastDay);
-			$szLastDay = $szDay;
-			
-			# calulate berlin time from world time if needed
-			if ($fIsWorldTime)
+			$pNextWakeTime->add( 'days' => 1 );
+		}
+		
+		
+		my $nDay = $pNextWakeTime->day();
+		my $nMonth = $pNextWakeTime->month();
+		my $nYear = $pNextWakeTime->year();
+		my $pmpEventsOfDay = $pmpEvents->{"events"}->{$nYear}->{$nMonth}->{$nDay};
+		
+#		warn Data::Dumper::Dumper( $pmpEventsOfDay ) if ($DEBUG == 1);
+		
+		
+		my $pChoosenWakeTime = undef;
+		foreach my $pEvent (values %$pmpEventsOfDay)
+		{
+			my $szSummary = $pEvent->{"SUMMARY"};
+			if ( $szSummary !~ m/BirthdayRemind/ )
 			{
-				# TODO passt das auch im winter oder darf es da nur 1 stunde sein
-				$nHour += 2;
+				my $pStartTime = $pEvent->{"DTSTART"};
+				print $szSummary." ".$pStartTime->datetime()."\n";
+				
+				if ( $pStartTime->hour_1() < $LAST_WAKE_EVENT_HOUR )
+				{
+					if (  (not defined $pChoosenWakeTime) or ( DateTime->compare($pStartTime, $pChoosenWakeTime) < 0)  )
+					{
+						$pChoosenWakeTime = $pStartTime;
+					}
+				}
 			}
+		}
+		
+		if (defined $pChoosenWakeTime)
+		{
+			print "Use time ".$pChoosenWakeTime->datetime()."\n";
 			
-			
-			my $nNewTimeInSec = timelocal( $nSecond, $nMinute, $nHour, $nDay, $nMonth-1, $nYear );
-#			my @anDate = localtime( $nNewTimeInSec );
-#			my $nDayOfWeek = $anDate[6];
-#			# Sonntags und Samstags nicht wecken
-#			 and ($nDayOfWeek != 0) and ($nDayOfWeek != 6)
-
-			# nächste Zeit suchen welche in der Zukunft liegt
-			if ( ($nNewTimeInSec > time) and ($nHour <= $LAST_WAKE_EVENT_HOUR) )
-			{
-				$nTimerSec = $nNewTimeInSec - $WAKE_TIME_MIN_DIFF * 60;
-				last;
-			}
+			$pChoosenWakeTime->subtract( 'minutes'=>$WAKE_TIME_MIN_DIFF );
+			$nTimerSec = $pChoosenWakeTime->epoch();
+			last;
 		}
 		else
 		{
-			warn "could not parse $szTime\n";
+			# look in the next day
+			$pNextWakeTime->add( 'days' => 1 );
 		}
 	}
-	
-	untie %mpszEvents;
 	
 	print "INFO: Next wake up time is ".localtime($nTimerSec)."\r\n";
 }
