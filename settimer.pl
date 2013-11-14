@@ -8,6 +8,7 @@ use Time::Local;
 use DateTime;
 use iCal::Parser();
 use Data::Dumper();
+use LWP::UserAgent();
 
 my $DEBUG					= 1;
 my $ACTIVE					= 1;
@@ -19,8 +20,7 @@ my $DEV                         = "/sys/class/rtc/rtc0/wakealarm";
 
 
 
-my $ICAL_FILE= "/media/server/private/wischer/Backup/.kde/share/apps/korganizer/std.ics";
-$ICAL_FILE= "/home/timo/.kde/share/apps/korganizer/std.ics" if ($DEBUG == 1);
+my $ICAL_FILE= "http://www.google.com/calendar/ical/...\@gmail.com/private-.../basic.ics";
 
 
 my $nTimerSec = 0;
@@ -33,8 +33,13 @@ if ($ACTIVE == 1)
 		$pNextWakeTime->add( 'days' => 1 );
 	}
 	
+	my $ua = LWP::UserAgent->new();
+ 	$ua->timeout(10);
+ 	$ua->env_proxy;
+ 	my $pICalData = $ua->get( $ICAL_FILE );
+	
 	my $pParser = iCal::Parser->new( 'start'=> $pNextWakeTime );
-	my $pmpEvents = $pParser->parse( $ICAL_FILE );
+	my $pmpEvents = $pParser->parse_strings( $pICalData->decoded_content() );
 	
 	
 	# try to find the next valid appointment (exit after one week was tested)
