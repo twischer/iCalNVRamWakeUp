@@ -26,23 +26,18 @@ my $ICAL_FILE= "http://www.google.com/calendar/ical/...\@gmail.com/private-.../b
 my $nTimerSec = 0;
 if ($ACTIVE == 1)
 {
-	my $pNextWakeTime = DateTime->today();
-	# caluclate the date of the next wake up day
-	if ( $pNextWakeTime->hour_1() >= $LAST_WAKE_EVENT_HOUR )
-	{
-		$pNextWakeTime->add( 'days' => 1 );
-	}
-	
 	my $ua = LWP::UserAgent->new();
  	$ua->timeout(10);
  	$ua->env_proxy;
  	my $pICalData = $ua->get( $ICAL_FILE );
 	
-	my $pParser = iCal::Parser->new( 'start'=> $pNextWakeTime );
+	my $pCurrentTime = DateTime->now();
+	my $pParser = iCal::Parser->new( 'start'=> $pCurrentTime, 'no_todos' => 1 );
 	my $pmpEvents = $pParser->parse_strings( $pICalData->decoded_content() );
 	
 	
 	# try to find the next valid appointment (exit after one week was tested)
+	my $pNextWakeTime = DateTime->today();
 	for (0..6)
 	{
 		# do not wake on saturday and sunday
@@ -57,7 +52,7 @@ if ($ACTIVE == 1)
 		my $nYear = $pNextWakeTime->year();
 		my $pmpEventsOfDay = $pmpEvents->{"events"}->{$nYear}->{$nMonth}->{$nDay};
 		
-#		warn Data::Dumper::Dumper( $pmpEventsOfDay ) if ($DEBUG == 1);
+		warn Data::Dumper::Dumper( $pmpEventsOfDay ) if ($DEBUG == 2);
 		
 		
 		my $pChoosenWakeTime = undef;
@@ -69,8 +64,10 @@ if ($ACTIVE == 1)
 				my $pStartTime = $pEvent->{"DTSTART"};
 				print $szSummary." ".$pStartTime->datetime()."\n";
 				
-				if ( $pStartTime->hour_1() < $LAST_WAKE_EVENT_HOUR )
+				# check if the event is early enough and in the future
+				if ( $pStartTime->hour() < $LAST_WAKE_EVENT_HOUR and DateTime->compare($pStartTime, $pCurrentTime) > 0 )
 				{
+					# replace wake up event, if the current one was not defined yet or is later than the new found event
 					if (  (not defined $pChoosenWakeTime) or ( DateTime->compare($pStartTime, $pChoosenWakeTime) < 0)  )
 					{
 						$pChoosenWakeTime = $pStartTime;
