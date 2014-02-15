@@ -12,6 +12,7 @@ use LWP::UserAgent();
 
 my $DEBUG					= 1;
 my $ACTIVE					= 1;
+my $FIRST_WAKE_EVENT_HOUR	= 1;
 my $LAST_WAKE_EVENT_HOUR	= 14;
 my $WAKE_TIME_MIN_DIFF		= 1*60 + 35;
 
@@ -40,13 +41,6 @@ if ($ACTIVE == 1)
 	my $pNextWakeTime = DateTime->today();
 	for (0..6)
 	{
-		# do not wake on saturday and sunday
-		while ( $pNextWakeTime->day_of_week() == 6 || $pNextWakeTime->day_of_week() == 7 )
-		{
-			$pNextWakeTime->add( 'days' => 1 );
-		}
-		
-		
 		my $nDay = $pNextWakeTime->day();
 		my $nMonth = $pNextWakeTime->month();
 		my $nYear = $pNextWakeTime->year();
@@ -65,7 +59,7 @@ if ($ACTIVE == 1)
 				print $szSummary." ".$pStartTime->datetime()."\n";
 				
 				# check if the event is early enough and in the future
-				if ( $pStartTime->hour() < $LAST_WAKE_EVENT_HOUR and DateTime->compare($pStartTime, $pCurrentTime) > 0 )
+				if ( $pStartTime->hour() >= $FIRST_WAKE_EVENT_HOUR and $pStartTime->hour() < $LAST_WAKE_EVENT_HOUR and DateTime->compare($pStartTime, $pCurrentTime) > 0 )
 				{
 					# replace wake up event, if the current one was not defined yet or is later than the new found event
 					if (  (not defined $pChoosenWakeTime) or ( DateTime->compare($pStartTime, $pChoosenWakeTime) < 0)  )
